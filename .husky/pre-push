@@ -1,1 +1,9 @@
+# Same rule as .github/workflows/branch-name.yml, checked before anything is sent.
+branch=$(git branch --show-current)
+if [ "$branch" != "main" ] && ! echo "$branch" | grep -Eq '^(feat|fix|docs|chore)/[0-9]+-[a-z0-9][a-z0-9-]*$'; then
+    echo "Branch '$branch' must look like <feat|fix|docs|chore>/<issue number>-short-slug, e.g. feat/12-refresh-rotation."
+    echo "Rename it with: git branch -m <new-name>"
+    exit 1
+fi
+
 bun run typecheck && bun test

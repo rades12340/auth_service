@@ -79,6 +79,8 @@ const { payload } = await jwtVerify(token, jwks, {
 | `src/keys.ts` | Loads the private JWK and derives the public JWK. |
 | `src/rateLimit.ts` | In-memory per-IP rate limiter. |
 | `scripts/gen-key.ts` | Prints a new Ed25519 key as an `.env` line. |
+| `scripts/check-issue.ts` | The PR `issue` check (see [PR rules](#pr-rules)). |
+| `.github/workflows/` | `ci.yml`, `pr-checks.yml` (labels, issue), `branch-name.yml`, `release.yml`. |
 
 ## Checks
 
@@ -88,7 +90,31 @@ const { payload } = await jwtVerify(token, jwks, {
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run lint` / `lint:fix` | Biome |
 
-Husky runs Biome on commit and typecheck + tests on push. GitHub Actions runs all three.
+Husky runs Biome on commit. On push, it checks the branch name (see below) and runs typecheck and tests. GitHub Actions runs all three on every push to any branch and on every PR.
+
+## PR rules
+
+`main` is protected: changes reach it only through a pull request, and these four checks must pass (admins included):
+
+| Check | Requires |
+| --- | --- |
+| **Lint, typecheck, test** | `ci.yml` passes. |
+| **branch-name** | The branch is named `<feat\|fix\|docs\|chore>/<issue number>-short-slug`, e.g. `feat/12-refresh-rotation`. This is also checked by the pre-push hook, so a wrongly named branch can't be pushed. Rename with `git branch -m`. |
+| **labels** | At least one of `feature`, `enhancement`, `bug`, `documentation`; none of `wontfix`, `invalid`, `duplicate`. |
+| **issue** | The PR references an open issue: `Closes #123` in the description, `#123` in the title, or the number in the branch name. The check tries each referenced number and passes on the first open issue. |
+
+With Claude Code, asking to "ship this" or "open a PR" uses the `ship-pr` skill in `.claude/skills/`, which follows these rules.
+
+## Releases
+
+Pushing a version tag re-runs CI on the tagged commit and, if it passes, publishes a GitHub release with notes grouped by PR label (`.github/release.yml`):
+
+```bash
+git switch main && git pull
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+A tag with a suffix such as `v1.1.0-beta.1` becomes a pre-release.
 
 ## Known limitations
 

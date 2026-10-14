@@ -1,0 +1,25 @@
+name: Branch name
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  branch-name:
+    name: branch-name
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require <type>/<issue>-slug
+        env:
+          # head_ref is set for pull_request; ref_name for push.
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          echo "Branch: $BRANCH"
+          if ! [[ "$BRANCH" =~ ^(feat|fix|docs|chore)/[0-9]+-[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "::error::Branch '$BRANCH' must look like <feat|fix|docs|chore>/<issue number>-short-slug, e.g. feat/12-refresh-rotation."
+            exit 1
+          fi

@@ -1,0 +1,56 @@
+name: PR checks
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  labels:
+    name: labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a type label
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          allowed='["feature","enhancement","bug","documentation"]'
+          blocked='["wontfix","invalid","duplicate"]'
+          echo "Labels on PR: $LABELS"
+
+          bad=$(jq -rn --argjson l "$LABELS" --argjson b "$blocked" '$l - ($l - $b) | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error::PR has blocking label(s): $bad"
+            exit 1
+          fi
+
+          ok=$(jq -rn --argjson l "$LABELS" --argjson a "$allowed" '$l - ($l - $a) | length')
+          if [ "$ok" -eq 0 ]; then
+            echo "::error::Add at least one type label: feature, enhancement, bug or documentation."
+            exit 1
+          fi
+
+  issue:
+    name: issue
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Match PR to an open issue
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.head_ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun scripts/check-issue.ts
