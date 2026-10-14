@@ -25,6 +25,17 @@ bun run dev               # http://localhost:4000
 
 For local development over plain http, set `COOKIE_SECURE=false` in `.env`.
 
+### Run with Docker
+
+```bash
+cp .env.example .env && bun run gen-key >> .env   # once, if .env doesn't exist yet
+docker compose up -d --build                      # http://localhost:4000
+```
+
+`compose.yaml` reads `AUTH_PRIVATE_KEY` from `.env` and sets the rest itself (`COOKIE_SECURE=false` for local http). The SQLite database lives in the `auth-data` volume, so users survive restarts. `docker compose down -v` deletes it.
+
+The stack also creates the Docker network `blob-storage`. blob_service's `compose.yaml` joins it and fetches the public keys from `http://auth:4000`, so start this stack first.
+
 ## Tokens
 
 | Token | Lifetime | Where it lives |
@@ -37,6 +48,8 @@ Access token claims: `sub` (user id), `iss` (`AUTH_ISSUER`), `aud` (`AUTH_AUDIEN
 If a refresh token that has already been replaced is used again, every session of that user is revoked (likely token theft).
 
 ## API
+
+Full reference with request/response schemas: **http://localhost:4000/docs** (Swagger UI). The raw spec is `openapi.yaml`, also served at `/openapi.json`.
 
 | Method & path | Body | Response |
 | --- | --- | --- |
@@ -77,10 +90,12 @@ const { payload } = await jwtVerify(token, jwks, {
 | `src/routes.ts` | All routes, token signing, cookies, CORS. |
 | `src/db.ts` | `bun:sqlite` schema and queries (`users`, `refresh_tokens`). |
 | `src/keys.ts` | Loads the private JWK and derives the public JWK. |
+| `openapi.yaml`, `src/docs.ts` | OpenAPI spec and the `/docs` + `/openapi.json` routes. `src/openapi.test.ts` fails if a route is added or removed without updating the spec. |
 | `src/rateLimit.ts` | In-memory per-IP rate limiter. |
 | `scripts/gen-key.ts` | Prints a new Ed25519 key as an `.env` line. |
 | `scripts/check-issue.ts` | The PR `issue` check (see [PR rules](#pr-rules)). |
 | `.github/workflows/` | `ci.yml`, `pr-checks.yml` (labels, issue), `branch-name.yml`, `release.yml`. |
+| `Dockerfile`, `compose.yaml` | Container image and the local Docker stack. |
 
 ## Checks
 
