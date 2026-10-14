@@ -1,0 +1,28 @@
+{
+  "name": "auth_service",
+  "module": "src/app.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch src/app.ts",
+    "gen-key": "bun scripts/gen-key.ts",
+    "prepare": "husky",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "lint-staged": {
+    "*.{ts,js,json}": "biome check --write --no-errors-on-unmatched"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/bun": "^1.4.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "jose": "^6.2.12"
+  }
+}
