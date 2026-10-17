@@ -149,3 +149,40 @@ test("rate limits login attempts per IP", async () => {
     expect((await post("/login", credentials)).status).toBe(401);
     expect((await post("/login", credentials)).status).toBe(429);
 });
+
+test("with trustProxy, rate limits by the address the proxy appended", async () => {
+    const { base } = await setup({
+        rateLimit: { limit: 1, windowMs: 60_000 },
+        trustProxy: true,
+    });
+    const login = (forwardedFor: string) =>
+        fetch(`${base}/login`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Forwarded-For": forwardedFor,
+            },
+            body: JSON.stringify(credentials),
+        });
+
+    expect((await login("10.0.0.1")).status).toBe(401);
+    expect((await login("10.0.0.2")).status).toBe(401);
+    // A client-supplied first entry doesn't give a fresh budget.
+    expect((await login("1.2.3.4, 10.0.0.1")).status).toBe(429);
+});
+
+test("without trustProxy, X-Forwarded-For is ignored", async () => {
+    const { base } = await setup({ rateLimit: { limit: 1, windowMs: 60_000 } });
+    const login = (forwardedFor: string) =>
+        fetch(`${base}/login`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Forwarded-For": forwardedFor,
+            },
+            body: JSON.stringify(credentials),
+        });
+
+    expect((await login("10.0.0.1")).status).toBe(401);
+    expect((await login("10.0.0.2")).status).toBe(429);
+});

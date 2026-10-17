@@ -60,7 +60,7 @@ Full reference with request/response schemas: **http://localhost:4000/docs** (Sw
 | `GET /me` | – (`Authorization: Bearer …`) | `200 { id, email }`, `401` otherwise |
 | `GET /.well-known/jwks.json` | – | `{ keys: [...] }` public keys |
 
-`/register` and `/login` are rate limited to 20 requests per minute per IP. The browser must call the API with `credentials: "include"` so the refresh cookie is sent; CORS allows only `CORS_ORIGIN`.
+`/register` and `/login` are rate limited to 20 requests per minute per IP. Behind api_gateway every request comes from the gateway's address, so set `TRUST_PROXY=true` there (compose does): the client IP is then the last `X-Forwarded-For` entry, the one the gateway appended. Leave it `false` when clients reach this service directly, or they could pick their own IP with that header. The browser must call the API with `credentials: "include"` so the refresh cookie is sent; CORS allows only `CORS_ORIGIN`.
 
 ```bash
 curl -X POST localhost:4000/register -H 'content-type: application/json' \
