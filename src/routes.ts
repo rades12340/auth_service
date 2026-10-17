@@ -1,5 +1,6 @@
 import { jwtVerify, SignJWT } from "jose";
 import type { Db } from "./db";
+import { docsRoutes } from "./docs";
 import { ALG, type SigningKey } from "./keys";
 import { createRateLimiter } from "./rateLimit";
 
@@ -93,6 +94,8 @@ export function createRoutes(config: AuthConfig) {
     }
 
     return {
+        ...docsRoutes,
+
         "/register": {
             OPTIONS: preflight,
             POST: async (

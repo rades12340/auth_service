@@ -1,0 +1,29 @@
+# Local stack: auth_service on http://localhost:4000.
+# Also creates the shared "blob-storage" network that the other services'
+# compose stacks join, so they can fetch public keys from http://auth:4000.
+name: auth-service
+
+services:
+  auth:
+    build: .
+    # AUTH_PRIVATE_KEY comes from .env (create it with `bun run gen-key >> .env`).
+    env_file: .env
+    environment:
+      PORT: "4000"
+      AUTH_ISSUER: http://localhost:4000
+      AUTH_AUDIENCE: blob_storage,todos_service
+      CORS_ORIGIN: http://localhost:5173
+      # Plain http locally, so the refresh cookie can't require https.
+      COOKIE_SECURE: "false"
+      DB_PATH: /data/auth.sqlite
+    ports:
+      - "4000:4000"
+    volumes:
+      - auth-data:/data
+
+volumes:
+  auth-data:
+
+networks:
+  default:
+    name: blob-storage

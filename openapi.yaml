@@ -1,0 +1,265 @@
+openapi: 3.1.0
+info:
+  title: auth_service
+  version: 1.0.0
+  description: |
+    Login service for the Blob_storage system. It issues short-lived JWT
+    access tokens (EdDSA, 15 min) that blob_service and todos_service verify
+    themselves using `GET /.well-known/jwks.json`.
+
+    **Typical flow:** `POST /register` → `POST /login` → copy `accessToken`
+    and send it as `Authorization: Bearer <token>` to the other services.
+    When it expires, `POST /refresh` returns a new one using the
+    `refresh_token` cookie that `/login` set.
+
+    Browsers must call this API with `credentials: "include"` so the cookie
+    is sent. `/register` and `/login` are limited to 20 requests per minute
+    per IP.
+servers:
+  - url: http://localhost:4000
+    description: Local (bun run dev or docker compose)
+
+paths:
+  /register:
+    post:
+      summary: Create an account
+      operationId: register
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/Credentials"
+      responses:
+        "201":
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: The email is invalid, or the password isn't 8–256 characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                email:
+                  value:
+                    error: Invalid email
+                password:
+                  value:
+                    error: Password must be 8-256 characters
+        "409":
+          description: The email is already registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Email already registered
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /login:
+    post:
+      summary: Log in
+      description: |
+        Returns an access token and sets the `refresh_token` cookie
+        (`HttpOnly`, `SameSite=Strict`, 14 days).
+      operationId: login
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/Credentials"
+      responses:
+        "200":
+          description: Logged in.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/RefreshCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessToken"
+        "401":
+          description: Wrong email or password. The response doesn't say which.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Invalid email or password
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /refresh:
+    post:
+      summary: Get a new access token
+      description: |
+        Exchanges the `refresh_token` cookie for a new access token and a new
+        cookie; the old refresh token stops working. Reusing an already
+        replaced refresh token logs the user out of every session.
+      operationId: refresh
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: New access token; the cookie was replaced.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/RefreshCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessToken"
+        "401":
+          description: No cookie, an unknown or reused token, or an expired session. The cookie is cleared.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                notLoggedIn:
+                  value:
+                    error: Not logged in
+                expired:
+                  value:
+                    error: Session expired
+
+  /logout:
+    post:
+      summary: Log out
+      description: Revokes the refresh token in the cookie (if any) and clears the cookie. Always succeeds.
+      operationId: logout
+      security:
+        - refreshCookie: []
+        - {}
+      responses:
+        "204":
+          description: Logged out.
+
+  /me:
+    get:
+      summary: Current user
+      operationId: me
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The user the access token belongs to.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Missing, invalid or expired access token, or the user no longer exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Unauthorized
+
+  /.well-known/jwks.json:
+    get:
+      summary: Public signing keys
+      description: |
+        The public half of the token signing key, for other services to
+        verify access tokens. Cacheable for 5 minutes.
+      operationId: jwks
+      security: []
+      responses:
+        "200":
+          description: JSON Web Key Set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jwks"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: The `accessToken` from `POST /login` or `POST /refresh`.
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: Set by `POST /login`. Browsers send it automatically; Swagger UI can't set it by hand.
+
+  requestBodies:
+    Credentials:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [email, password]
+            properties:
+              email:
+                type: string
+                format: email
+                maxLength: 254
+                description: Trimmed and lower-cased before use.
+              password:
+                type: string
+                minLength: 8
+                maxLength: 256
+          example:
+            email: me@example.com
+            password: password123
+
+  headers:
+    RefreshCookie:
+      description: "`refresh_token=<random>; Path=/; HttpOnly; SameSite=Strict` (+ `Secure` unless COOKIE_SECURE=false)"
+      schema:
+        type: string
+
+  responses:
+    TooManyRequests:
+      description: More than 20 requests in a minute from this IP.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: Too many requests
+
+  schemas:
+    User:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          description: Becomes the `sub` claim of access tokens.
+        email:
+          type: string
+          format: email
+
+    AccessToken:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken:
+          type: string
+          description: |
+            JWT signed with EdDSA. Claims: `sub` (user id), `iss`, `aud`
+            (`blob_storage`, `todos_service`), `iat`, `exp` (15 min).
+
+    Jwks:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            description: "Ed25519 public JWK (`kty: OKP`, `crv: Ed25519`) with its `kid`."
+            additionalProperties: true
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
