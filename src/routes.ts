@@ -14,6 +14,8 @@ export type AuthConfig = {
     refreshTtlSeconds: number;
     cookieSecure: boolean;
     rateLimit: { limit: number; windowMs: number };
+    // Only behind a proxy that sets X-Forwarded-For, such as api_gateway.
+    trustProxy: boolean;
 };
 
 const REFRESH_COOKIE = "refresh_token";
@@ -88,9 +90,18 @@ export function createRoutes(config: AuthConfig) {
         request.cookies.delete({ name: REFRESH_COOKIE, path: "/" });
     }
 
+    // Behind the API gateway every request comes from the gateway's address.
+    // With trustProxy, the client is the last X-Forwarded-For entry: the one
+    // the gateway appended, which a client can't forge.
+    function clientIp(request: Request, server: Bun.Server<unknown>) {
+        const forwarded = config.trustProxy
+            ? request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim()
+            : undefined;
+        return forwarded || server.requestIP(request)?.address || "unknown";
+    }
+
     function rateLimited(request: Request, server: Bun.Server<unknown>) {
-        const ip = server.requestIP(request)?.address ?? "unknown";
-        return !allow(ip);
+        return !allow(clientIp(request, server));
     }
 
     return {

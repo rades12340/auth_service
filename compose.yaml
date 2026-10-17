@@ -15,6 +15,9 @@ services:
       CORS_ORIGIN: http://localhost:5173
       # Plain http locally, so the refresh cookie can't require https.
       COOKIE_SECURE: "false"
+      # api_gateway forwards the client's address in X-Forwarded-For, so the
+      # login rate limit counts per client instead of per gateway.
+      TRUST_PROXY: "true"
       DB_PATH: /data/auth.sqlite
     ports:
       - "4000:4000"

@@ -19,6 +19,7 @@ const routes = createRoutes({
     refreshTtlSeconds: 60,
     cookieSecure: false,
     rateLimit: { limit: 20, windowMs: 60_000 },
+    trustProxy: false,
 });
 
 test("the spec documents exactly the routes the server has", () => {

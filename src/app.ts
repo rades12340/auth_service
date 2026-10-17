@@ -38,6 +38,7 @@ export async function startServer(options: ServerOptions = {}) {
         refreshTtlSeconds: options.refreshTtlSeconds ?? 14 * 24 * 60 * 60,
         cookieSecure: options.cookieSecure ?? env.COOKIE_SECURE !== "false",
         rateLimit: options.rateLimit ?? { limit: 20, windowMs: 60_000 },
+        trustProxy: options.trustProxy ?? env.TRUST_PROXY === "true",
     };
 
     return Bun.serve({
