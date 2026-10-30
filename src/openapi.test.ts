@@ -3,6 +3,7 @@ import spec from "../openapi.yaml";
 import { generatePrivateJwk } from "../scripts/gen-key";
 import { openDb } from "./db";
 import { loadSigningKey } from "./keys";
+import { createLogger } from "./log";
 import { createRoutes } from "./routes";
 
 // Served for people, not part of the API, so not in the spec.
@@ -20,7 +21,15 @@ const routes = createRoutes({
     cookieSecure: false,
     rateLimit: { limit: 20, windowMs: 60_000 },
     trustProxy: false,
+    logger: createLogger({ service: "auth", write: () => {} }),
 });
+
+// Docs routes use neither the request body nor the server.
+const get = (path: "/openapi.json" | "/docs") =>
+    routes[path].GET(
+        new Request(`http://auth.test${path}`) as Bun.BunRequest,
+        {} as Bun.Server<unknown>,
+    );
 
 test("the spec documents exactly the routes the server has", () => {
     const served = Object.entries(routes)
@@ -42,11 +51,11 @@ test("the spec documents exactly the routes the server has", () => {
 });
 
 test("serves the spec as JSON and a Swagger UI page", async () => {
-    const json = await routes["/openapi.json"].GET();
+    const json = await get("/openapi.json");
     expect(json.status).toBe(200);
     expect((await json.json()).openapi).toStartWith("3.1");
 
-    const page = await routes["/docs"].GET();
+    const page = await get("/docs");
     expect(page.headers.get("content-type")).toContain("text/html");
     expect(await page.text()).toContain("SwaggerUIBundle");
 });

@@ -91,11 +91,43 @@ const { payload } = await jwtVerify(token, jwks, {
 | `src/db.ts` | `bun:sqlite` schema and queries (`users`, `refresh_tokens`). |
 | `src/keys.ts` | Loads the private JWK and derives the public JWK. |
 | `openapi.yaml`, `src/docs.ts` | OpenAPI spec and the `/docs` + `/openapi.json` routes. `src/openapi.test.ts` fails if a route is added or removed without updating the spec. |
+| `src/log.ts` | JSON line logger (see [Logging](#logging)). |
 | `src/rateLimit.ts` | In-memory per-IP rate limiter. |
 | `scripts/gen-key.ts` | Prints a new Ed25519 key as an `.env` line. |
 | `scripts/check-issue.ts` | The PR `issue` check (see [PR rules](#pr-rules)). |
 | `.github/workflows/` | `ci.yml`, `pr-checks.yml` (labels, issue), `branch-name.yml`, `release.yml`. |
 | `Dockerfile`, `compose.yaml` | Container image and the local Docker stack. |
+
+## Logging
+
+Every line on stdout is one JSON object:
+
+```json
+{"time":"2026-10-30T12:00:00.000Z","level":"info","service":"auth","message":"request","requestId":"…","method":"POST","route":"/login","status":200,"ms":42,"userId":"…"}
+```
+
+Always present: `time` (ISO 8601), `level`, `service` (`"auth"`), `message`. Lines written while handling a request also have `requestId`: the incoming `X-Request-Id` (api_gateway sends one) if it matches `^[A-Za-z0-9._-]{1,128}$`, otherwise a new UUID. Every response, errors and preflights included, carries it back in `X-Request-Id`.
+
+`LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`) drops lines below that level.
+
+| Message | Level | Fields |
+| --- | --- | --- |
+| `listening` | info | `port` |
+| `request` | info | Access log, one per request: `method`, `route` (the route pattern, `unmatched` for 404s), `status`, `ms`, and `userId` when the request was authenticated |
+| `user registered` | info | `userId` |
+| `register rejected` | warn | `reason` (`invalid_email`, `invalid_password`, `duplicate`, `rate_limited`), `email` (masked) or `clientIp` |
+| `login succeeded` | info | `userId`, `clientIp` |
+| `login failed` | warn | `email` (masked), `clientIp`, `reason` (`unknown_email` or `wrong_password`; the client always gets the same 401) |
+| `login rate limited` | warn | `clientIp` |
+| `token refreshed` | debug | `userId` |
+| `refresh token reuse detected` | warn | `userId`; all of that user's sessions were revoked |
+| `refresh rejected` | info | `reason` (`no_cookie`, `unknown_token`, `expired`) |
+| `logged out` | info | `userId` when the token was known |
+| `unhandled error` | error | `route`, `error` |
+
+`clientIp` honours `TRUST_PROXY` the same way the rate limiter does. Emails are masked as `u***@example.com`. Never logged: passwords, access and refresh tokens, the `Authorization` header, cookies, private keys and query strings.
+
+In Docker the `json-file` driver keeps the logs, rotated at 10 MB × 3 files (`compose.yaml`).
 
 ## Checks
 
