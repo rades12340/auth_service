@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { openDb } from "./db";
 import { loadSigningKey } from "./keys";
-import { type AuthConfig, createRoutes } from "./routes";
+import { createLogger } from "./log";
+import { type AuthConfig, createRoutes, instrument } from "./routes";
 
 export type ServerOptions = Partial<AuthConfig> & {
     port?: number;
@@ -39,18 +40,20 @@ export async function startServer(options: ServerOptions = {}) {
         cookieSecure: options.cookieSecure ?? env.COOKIE_SECURE !== "false",
         rateLimit: options.rateLimit ?? { limit: 20, windowMs: 60_000 },
         trustProxy: options.trustProxy ?? env.TRUST_PROXY === "true",
+        logger: options.logger ?? createLogger({ service: "auth" }),
     };
 
-    return Bun.serve({
+    const server = Bun.serve({
         port,
         routes: createRoutes(config),
-        fetch() {
-            return Response.json({ error: "Not found" }, { status: 404 });
-        },
+        fetch: instrument(config.logger, "unmatched", () =>
+            Response.json({ error: "Not found" }, { status: 404 }),
+        ),
     });
+    config.logger.info("listening", { port: server.port });
+    return server;
 }
 
 if (import.meta.main) {
-    const server = await startServer();
-    console.log(`Auth service running at ${server.url}`);
+    await startServer();
 }

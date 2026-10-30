@@ -19,6 +19,13 @@ services:
       # login rate limit counts per client instead of per gateway.
       TRUST_PROXY: "true"
       DB_PATH: /data/auth.sqlite
+      LOG_LEVEL: info
+    # JSON lines on stdout; rotate so they don't fill the disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "4000:4000"
     volumes:
