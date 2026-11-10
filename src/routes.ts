@@ -17,6 +17,9 @@ export type AuthConfig = {
     rateLimit: { limit: number; windowMs: number };
     // Only behind a proxy that sets X-Forwarded-For, such as api_gateway.
     trustProxy: boolean;
+    // Called with DELETE and the user's own access token before an account
+    // is deleted, so other services erase that user's data (GDPR).
+    eraseUrls: string[];
     logger: Logger;
 };
 
@@ -133,7 +136,7 @@ export function createRoutes(config: AuthConfig) {
         "Access-Control-Allow-Origin": config.corsOrigin,
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
         "Access-Control-Expose-Headers": "X-Request-Id",
         Vary: "Origin",
     };
@@ -164,6 +167,19 @@ export function createRoutes(config: AuthConfig) {
             .setIssuedAt()
             .setExpirationTime(`${config.accessTtlSeconds}s`)
             .sign(key.privateKey);
+    }
+
+    // The user behind a valid `Authorization: Bearer` access token, if any.
+    async function authenticate(request: Request) {
+        const header = request.headers.get("authorization") ?? "";
+        const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+        const payload = await jwtVerify(token, key.publicKey, {
+            issuer: config.issuer,
+            algorithms: [ALG],
+        })
+            .then((result) => result.payload)
+            .catch(() => null);
+        return payload?.sub ? db.findUserById(payload.sub) : null;
     }
 
     function issueRefreshToken(request: Bun.BunRequest, userId: string) {
@@ -345,22 +361,74 @@ export function createRoutes(config: AuthConfig) {
         "/me": {
             OPTIONS: preflight,
             GET: async (request, _server, ctx) => {
-                const header = request.headers.get("authorization") ?? "";
-                const token = header.startsWith("Bearer ")
-                    ? header.slice(7)
-                    : "";
-                const payload = await jwtVerify(token, key.publicKey, {
-                    issuer: config.issuer,
-                    algorithms: [ALG],
-                })
-                    .then((result) => result.payload)
-                    .catch(() => null);
-                const user = payload?.sub ? db.findUserById(payload.sub) : null;
+                const user = await authenticate(request);
                 if (!user) {
                     return json({ error: "Unauthorized" }, 401);
                 }
                 ctx.userId = user.id;
                 return json({ id: user.id, email: user.email });
+            },
+            // GDPR right to erasure. The password is asked again so a stolen
+            // access token alone can't delete the account.
+            DELETE: async (request, server, ctx) => {
+                const ip = clientIp(request, server);
+                if (!allow(ip)) {
+                    ctx.log.warn("account deletion rejected", {
+                        reason: "rate_limited",
+                        clientIp: ip,
+                    });
+                    return json({ error: "Too many requests" }, 429);
+                }
+                const user = await authenticate(request);
+                if (!user) {
+                    return json({ error: "Unauthorized" }, 401);
+                }
+                ctx.userId = user.id;
+                const { password } = await readCredentials(request);
+                if (
+                    !(await Bun.password.verify(password, user.password_hash))
+                ) {
+                    ctx.log.warn("account deletion rejected", {
+                        reason: "wrong_password",
+                        userId: user.id,
+                    });
+                    return json({ error: "Wrong password" }, 401);
+                }
+
+                // Other services erase first. If one fails the account stays,
+                // so the user can retry instead of leaving data nobody can
+                // reach. Their erasure is idempotent, so retrying is safe.
+                for (const url of config.eraseUrls) {
+                    const status = await fetch(url, {
+                        method: "DELETE",
+                        headers: {
+                            Authorization:
+                                request.headers.get("authorization") ?? "",
+                            "X-Request-Id": ctx.requestId,
+                        },
+                    })
+                        .then((response) => response.status)
+                        .catch(() => 0);
+                    if (status < 200 || status > 299) {
+                        ctx.log.error("account deletion failed", {
+                            userId: user.id,
+                            service: new URL(url).host,
+                            status,
+                        });
+                        return json(
+                            { error: "Could not erase your data, try again" },
+                            502,
+                        );
+                    }
+                }
+
+                db.deleteUser(user.id);
+                clearRefreshCookie(request);
+                ctx.log.info("account deleted", { userId: user.id });
+                return new Response(null, {
+                    status: 204,
+                    headers: corsHeaders,
+                });
             },
         },
 

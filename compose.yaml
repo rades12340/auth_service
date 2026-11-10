@@ -19,6 +19,8 @@ services:
       # login rate limit counts per client instead of per gateway.
       TRUST_PROXY: "true"
       DB_PATH: /data/auth.sqlite
+      # Deleting an account first erases the user's files in Blob_storage.
+      ERASE_URLS: http://blob:3000/files
       LOG_LEVEL: info
     # JSON lines on stdout; rotate so they don't fill the disk.
     logging:

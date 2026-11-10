@@ -156,6 +156,52 @@ paths:
                 $ref: "#/components/schemas/Error"
               example:
                 error: Unauthorized
+    delete:
+      summary: Delete your account
+      description: |
+        Permanently deletes the account (GDPR right to erasure). The password is
+        checked again, so a stolen access token alone can't do this.
+
+        First every service in `ERASE_URLS` (Blob_storage's `DELETE /files` by
+        default) is called with the same access token to erase the user's data.
+        If any of them fails, the account is kept and the response is `502`;
+        retrying is safe. Then the user and all their sessions are deleted and
+        the refresh cookie is cleared.
+      operationId: deleteAccount
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  format: password
+      responses:
+        "204":
+          description: The account and the user's data are gone.
+        "401":
+          description: Missing or invalid access token, or wrong password.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Wrong password
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          description: Another service couldn't erase the user's data. Nothing was deleted from auth_service; try again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Could not erase your data, try again
 
   /.well-known/jwks.json:
     get:
