@@ -21,6 +21,7 @@ const routes = createRoutes({
     cookieSecure: false,
     rateLimit: { limit: 20, windowMs: 60_000 },
     trustProxy: false,
+    eraseUrls: [],
     logger: createLogger({ service: "auth", write: () => {} }),
 });
 

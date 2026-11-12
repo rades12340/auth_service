@@ -40,6 +40,12 @@ export async function startServer(options: ServerOptions = {}) {
         cookieSecure: options.cookieSecure ?? env.COOKIE_SECURE !== "false",
         rateLimit: options.rateLimit ?? { limit: 20, windowMs: 60_000 },
         trustProxy: options.trustProxy ?? env.TRUST_PROXY === "true",
+        eraseUrls:
+            options.eraseUrls ??
+            (env.ERASE_URLS ?? "http://localhost:3000/files")
+                .split(",")
+                .map((url) => url.trim())
+                .filter(Boolean),
         logger: options.logger ?? createLogger({ service: "auth" }),
     };
 

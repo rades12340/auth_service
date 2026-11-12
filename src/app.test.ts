@@ -31,6 +31,7 @@ async function setup(options: Parameters<typeof startServer>[0] = {}) {
         audience: ["blob_storage"],
         corsOrigin: "http://app.test",
         cookieSecure: false,
+        eraseUrls: [],
         ...options,
     });
     servers.push(server);
@@ -446,4 +447,131 @@ test("LOG_LEVEL drops lines below the configured level", () => {
     expect(levels("error")).toEqual(["error"]);
     expect(levels("")).toEqual(["info", "warn", "error"]);
     expect(levels("loud")).toEqual(["info", "warn", "error"]);
+});
+
+// Stands in for Blob_storage's DELETE /files and records what it received.
+function fakeBlob(status = 200) {
+    const calls: { method: string; authorization: string | null }[] = [];
+    const server = Bun.serve({
+        port: 0,
+        fetch(request) {
+            calls.push({
+                method: request.method,
+                authorization: request.headers.get("authorization"),
+            });
+            return Response.json({ deleted: 0 }, { status });
+        },
+    });
+    servers.push(server);
+    return { url: `http://127.0.0.1:${server.port}/files`, calls };
+}
+
+async function signedIn(
+    post: (path: string, body?: unknown) => Promise<Response>,
+) {
+    await post("/register", credentials);
+    const login = await post("/login", credentials);
+    const { accessToken } = await login.json();
+    return { accessToken, cookie: cookieFrom(login) };
+}
+
+function deleteAccount(base: string, accessToken: string, password: string) {
+    return fetch(`${base}/me`, {
+        method: "DELETE",
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password }),
+    });
+}
+
+test("DELETE /me erases the user's files, then the account and sessions", async () => {
+    const blob = fakeBlob();
+    const { base, post, find } = await setup({ eraseUrls: [blob.url] });
+    const { accessToken, cookie } = await signedIn(post);
+
+    const response = await deleteAccount(
+        base,
+        accessToken,
+        credentials.password,
+    );
+
+    expect(response.status).toBe(204);
+    expect(blob.calls).toEqual([
+        { method: "DELETE", authorization: `Bearer ${accessToken}` },
+    ]);
+    expect(
+        (
+            await fetch(`${base}/me`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+            })
+        ).status,
+    ).toBe(401);
+    expect((await post("/refresh", undefined, cookie)).status).toBe(401);
+    expect((await post("/login", credentials)).status).toBe(401);
+    expect(find("account deleted")).toHaveLength(1);
+});
+
+test("DELETE /me needs the right password and a valid token", async () => {
+    const blob = fakeBlob();
+    const { base, post, find } = await setup({ eraseUrls: [blob.url] });
+    const { accessToken } = await signedIn(post);
+
+    expect(
+        (await deleteAccount(base, accessToken, "wrong password")).status,
+    ).toBe(401);
+    expect(
+        (await deleteAccount(base, "not-a-jwt", credentials.password)).status,
+    ).toBe(401);
+
+    expect(blob.calls).toEqual([]);
+    expect((await post("/login", credentials)).status).toBe(200);
+    expect(find("account deletion rejected")).toMatchObject([
+        { reason: "wrong_password" },
+    ]);
+});
+
+test("DELETE /me keeps the account when erasure fails", async () => {
+    const failing = fakeBlob(502);
+    const { base, post, find } = await setup({
+        // The second URL is never reached: the first failure stops it.
+        eraseUrls: [failing.url, "http://127.0.0.1:1/files"],
+    });
+    const { accessToken } = await signedIn(post);
+
+    const response = await deleteAccount(
+        base,
+        accessToken,
+        credentials.password,
+    );
+
+    expect(response.status).toBe(502);
+    expect((await post("/login", credentials)).status).toBe(200);
+    expect(find("account deletion failed")).toMatchObject([{ status: 502 }]);
+});
+
+test("DELETE /me keeps the account when a service is unreachable", async () => {
+    const { base, post, find } = await setup({
+        eraseUrls: ["http://127.0.0.1:1/files"],
+    });
+    const { accessToken } = await signedIn(post);
+
+    expect(
+        (await deleteAccount(base, accessToken, credentials.password)).status,
+    ).toBe(502);
+    expect((await post("/login", credentials)).status).toBe(200);
+    expect(find("account deletion failed")).toMatchObject([{ status: 0 }]);
+});
+
+test("account deletion logs no email, password or token", async () => {
+    const blob = fakeBlob();
+    const { base, post, raw } = await setup({ eraseUrls: [blob.url] });
+    const { accessToken } = await signedIn(post);
+    await deleteAccount(base, accessToken, credentials.password);
+
+    const all = raw.join("\n");
+    expect(all).not.toContain(accessToken);
+    expect(all).not.toContain(credentials.password);
+    expect(all.toLowerCase()).not.toContain(credentials.email.toLowerCase());
 });

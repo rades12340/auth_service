@@ -58,9 +58,12 @@ Full reference with request/response schemas: **http://localhost:4000/docs** (Sw
 | `POST /refresh` | – (uses the cookie) | `200 { accessToken }` and a new cookie, `401` otherwise |
 | `POST /logout` | – (uses the cookie) | `204`, revokes the refresh token |
 | `GET /me` | – (`Authorization: Bearer …`) | `200 { id, email }`, `401` otherwise |
+| `DELETE /me` | `{ password }` (`Authorization: Bearer …`) | `204` and the cookie is cleared; `401` for a bad token or wrong password; `502` if another service couldn't erase the user's data (nothing was deleted, retry) |
 | `GET /.well-known/jwks.json` | – | `{ keys: [...] }` public keys |
 
-`/register` and `/login` are rate limited to 20 requests per minute per IP. Behind api_gateway every request comes from the gateway's address, so set `TRUST_PROXY=true` there (compose does): the client IP is then the last `X-Forwarded-For` entry, the one the gateway appended. Leave it `false` when clients reach this service directly, or they could pick their own IP with that header. The browser must call the API with `credentials: "include"` so the refresh cookie is sent; CORS allows only `CORS_ORIGIN`.
+**Deleting an account (GDPR right to erasure).** `DELETE /me` first calls every URL in `ERASE_URLS` (comma-separated, default `http://localhost:3000/files`, compose uses `http://blob:3000/files`) with `DELETE` and the user's own access token, so each service erases that user's data. Only when all of them return 2xx are the user and their sessions deleted. Add todos_service's erase endpoint to the list once it exists.
+
+`/register`, `/login` and `DELETE /me` are rate limited to 20 requests per minute per IP. Behind api_gateway every request comes from the gateway's address, so set `TRUST_PROXY=true` there (compose does): the client IP is then the last `X-Forwarded-For` entry, the one the gateway appended. Leave it `false` when clients reach this service directly, or they could pick their own IP with that header. The browser must call the API with `credentials: "include"` so the refresh cookie is sent; CORS allows only `CORS_ORIGIN`.
 
 ```bash
 curl -X POST localhost:4000/register -H 'content-type: application/json' \
@@ -123,6 +126,9 @@ Always present: `time` (ISO 8601), `level`, `service` (`"auth"`), `message`. Lin
 | `refresh token reuse detected` | warn | `userId`; all of that user's sessions were revoked |
 | `refresh rejected` | info | `reason` (`no_cookie`, `unknown_token`, `expired`) |
 | `logged out` | info | `userId` when the token was known |
+| `account deleted` | info | `userId` |
+| `account deletion rejected` | warn | `reason` (`wrong_password` with `userId`, or `rate_limited` with `clientIp`) |
+| `account deletion failed` | error | `userId`, `service` (host of the erase URL), `status` (`0` when unreachable); the account was kept |
 | `unhandled error` | error | `route`, `error` |
 
 `clientIp` honours `TRUST_PROXY` the same way the rate limiter does. Emails are masked as `u***@example.com`. Never logged: passwords, access and refresh tokens, the `Authorization` header, cookies, private keys and query strings.

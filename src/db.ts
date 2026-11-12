@@ -86,6 +86,11 @@ export function openDb(path: string) {
             ).run(Date.now(), userId);
         },
 
+        // refresh_tokens rows go with it (ON DELETE CASCADE).
+        deleteUser(id: string) {
+            db.query("DELETE FROM users WHERE id = ?").run(id);
+        },
+
         close() {
             db.close();
         },
